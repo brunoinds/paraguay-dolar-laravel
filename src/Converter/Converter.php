@@ -66,7 +66,12 @@ class Converter{
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_CUSTOMREQUEST => 'POST',
+
         ]);
+
+        //Set timeout of 5 seconds:
+        curl_setopt($curl, CURLOPT_TIMEOUT, 5);
+        
 
         //set post form fields:
         curl_setopt($curl, CURLOPT_POSTFIELDS, 'fecha=' . $date->format('d/m/Y'));
