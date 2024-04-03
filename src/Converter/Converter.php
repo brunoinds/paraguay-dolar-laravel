@@ -2,13 +2,15 @@
 
 namespace Brunoinds\ParaguayDolarLaravel\Converter;
 
-use Illuminate\Support\Facades\Cache;
 use DateTime;
 use Carbon\Carbon;
+use Brunoinds\ParaguayDolarLaravel\Store\Store;
 
 
 class Converter{
-    public static function convertFromTo(DateTime $date, float $amount, string $from, string $to){
+    public static Store|null $store = null;
+    public static function convertFromTo(DateTime $date, float $amount, string $from, string $to)
+    {
         if ($from === $to){
             return $amount;
         }
@@ -19,7 +21,8 @@ class Converter{
             return $amount / Converter::fetchExchangeRates($date, $to);
         }
     }
-    private static function fetchExchangeRates(DateTime $date, string $to){
+    private static function fetchExchangeRates(DateTime $date, string $to)
+    {
         if ($date->format('Y-m-d') > Carbon::now()->timezone('America/Lima')->format('Y-m-d')){
             $date = Carbon::now()->timezone('America/Lima')->toDateTime();
         }
@@ -47,7 +50,7 @@ class Converter{
         $curl = curl_init();
 
         $stores = [];
-        $cachedValue = Cache::store('file')->get('Brunoinds/ParaguayDolarLaravelStore');
+        $cachedValue = Converter::$store->get();
         if ($cachedValue){
             $stores = json_decode($cachedValue, true);
             if (isset($stores[$dateString])){
@@ -114,9 +117,8 @@ class Converter{
         $rate = $currenciesTable[$to];
 
         $stores[$dateString] = $rate;
-        Cache::store('file')->put('Brunoinds/ParaguayDolarLaravelStore', json_encode($stores));
 
+        Converter::$store->set(json_encode($stores));
         return $rate;
     }
-
 }
