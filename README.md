@@ -2,6 +2,12 @@
 
 A simple PHP library for exchanging currencies based on bcp.gov.py
 
+<p align="center">
+<a href="https://packagist.org/packages/brunoinds/paraguay-dolar-laravel"><img src="https://img.shields.io/packagist/dt/brunoinds/paraguay-dolar-laravel" alt="Total Downloads"></a>
+<a href="https://packagist.org/packages/brunoinds/paraguay-dolar-laravel"><img src="https://img.shields.io/packagist/v/brunoinds/paraguay-dolar-laravel" alt="Latest Stable Version"></a>
+<a href="https://packagist.org/packages/brunoinds/paraguay-dolar-laravel"><img src="https://img.shields.io/packagist/l/brunoinds/paraguay-dolar-laravel" alt="License"></a>
+</p>
+
 ## Installation
 
 Install via Composer:
