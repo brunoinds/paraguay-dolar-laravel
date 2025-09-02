@@ -9,116 +9,110 @@ use Brunoinds\ParaguayDolarLaravel\Store\Store;
 
 class Converter{
     public static Store|null $store = null;
+
     public static function convertFromTo(DateTime $date, float $amount, string $from, string $to)
     {
         if ($from === $to){
             return $amount;
         }
 
-        if ($from === 'USD'){
-            return $amount * Converter::fetchExchangeRates($date, $from);
-        }else if ($to === 'USD'){
-            return $amount / Converter::fetchExchangeRates($date, $to);
-        }
+        return Converter::fetchConvertion($date, $amount, $from, $to);
     }
-    private static function fetchExchangeRates(DateTime $date, string $to)
+
+    private static function fetchConvertion(DateTime $date, float $amount, string $from, string $to)
     {
         if ($date->format('Y-m-d') > Carbon::now()->timezone('America/Lima')->format('Y-m-d')){
             $date = Carbon::now()->timezone('America/Lima')->toDateTime();
         }
 
-        $dateInfo = Carbon::createFromDate($date);
-
-        if ($dateInfo->isFuture()){
-            $dateInfo = Carbon::now()->timezone('America/Lima');
-        }
-        if ($dateInfo->isToday()){
-            $dateInfo = $dateInfo->subDays(1);
-        }
-        if ($dateInfo->isWeekend()){
-            if ($dateInfo->isSunday()){
-                $dateInfo->subDays(2);
-            }else{
-                $dateInfo->subDays(1);
-            }
-        }
-
-        $date = $dateInfo->toDateTime();
-
         $dateString = $date->format('Y-m-d');
 
         $curl = curl_init();
+
+        // Build the API URL based on whether it's historical or current conversion
+        $apiKey = env('CURRENCY_GETGEO_API_KEY');
+        if (!$apiKey) {
+            throw new \Exception('CURRENCY_GETGEO_API_KEY environment variable is not set');
+        }
+
+        $curlURL = 'https://api.getgeoapi.com/v2/currency/convert?' . http_build_query([
+            'api_key' => $apiKey,
+            'from' => $from,
+            'to' => $to,
+            'amount' => $amount,
+            'format' => 'json'
+        ]);
+
+        // For historical data, use the historical endpoint
+        if ($dateString !== Carbon::now()->timezone('America/Lima')->format('Y-m-d')) {
+            $curlURL = 'https://api.getgeoapi.com/v2/currency/historical/' . $dateString . '?' . http_build_query([
+                'api_key' => $apiKey,
+                'from' => $from,
+                'to' => $to,
+                'amount' => $amount,
+                'format' => 'json'
+            ]);
+        }
 
         $stores = [];
         $cachedValue = Converter::$store->get();
         if ($cachedValue){
             $stores = json_decode($cachedValue, true);
-            if (isset($stores[$dateString])){
-                return $stores[$dateString];
+            if (isset($stores[$curlURL])){
+                return $stores[$curlURL];
             }
         }
 
-
         curl_setopt_array($curl, [
-            CURLOPT_URL => 'https://www.bcp.gov.py/webapps/web/cotizacion/monedas',
+            CURLOPT_URL => $curlURL,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_SSL_VERIFYPEER => 0,
             CURLOPT_ENCODING => '',
             CURLOPT_MAXREDIRS => 2,
-            CURLOPT_TIMEOUT => 0,
+            CURLOPT_TIMEOUT => 10,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => 'POST',
-
+            CURLOPT_CUSTOMREQUEST => 'GET',
         ]);
 
-        //Set timeout of 5 seconds:
-        curl_setopt($curl, CURLOPT_TIMEOUT, 5);
-        
-
-        //set post form fields:
-        curl_setopt($curl, CURLOPT_POSTFIELDS, 'fecha=' . $date->format('d/m/Y'));
-
         $response = curl_exec($curl);
+        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         curl_close($curl);
 
-        //Check response code is 200:
         if ($response === false) {
-            throw new \Exception('Failed to fetch exchange rates from Banco Central de Paraguay API: ' . curl_error($curl));
+            throw new \Exception('Failed to fetch exchange rates from GetGeoAPI: ' . curl_error($curl));
         }
 
-        $currenciesTable = [];
+        $results = json_decode($response, true);
 
-        //Convert to DOM:
-        $dom = new \DOMDocument();
-        @$dom->loadHTML($response);
-        $table = $dom->getElementById('cotizacion-interbancaria');
-
-        $i = 0;
-        foreach ($table->getElementsByTagName('tr') as $row) {
-            if ($i >= 22 || $i < 2){
-                $i++;
-                continue;
-            }else{
-                $i++;
-            }
-            $tds = $row->getElementsByTagName('td');
-            $currency = $tds[1]->nodeValue;
-
-            $value = $tds[3]->nodeValue;
-            $value = str_replace('.', '', $value);
-            $value = str_replace(',', '.', $value);
-            $value = floatval($value);
-            $currenciesTable[$currency] = $value;
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception('Invalid JSON response: "' . json_last_error_msg(). '". The API response was: ' . $response);
         }
 
-        $rate = $currenciesTable[$to];
+        // Check if the API returned an error
+        if (isset($results['status']) && $results['status'] === 'failed') {
+            $errorMessage = isset($results['error']['message']) ? $results['error']['message'] : 'Unknown error';
+            $errorCode = isset($results['error']['code']) ? $results['error']['code'] : 'Unknown';
+            throw new \Exception('GetGeoAPI error (' . $errorCode . '): ' . $errorMessage);
+        }
 
-        $rate = $currenciesTable[$to];
+        // Check if the response has the expected structure
+        if (!isset($results['rates']) || !isset($results['rates'][$to])) {
+            throw new \Exception('Invalid API response structure. Expected rates for ' . $to . '. The API response was: ' . $response);
+        }
 
-        $stores[$dateString] = $rate;
+        try {
+            $rate = $results['rates'][$to]['rate_for_amount'];
+            $stores[$curlURL] = $rate;
+        } catch (\Throwable $th) {
+            throw new \Exception('Error while parsing the conversion rate. The API response was: ' . $response);
+        }
 
-        Converter::$store->set(json_encode($stores));
-        return $rate;
+        try {
+            Converter::$store->set(json_encode($stores));
+            return $rate;
+        } catch (\Throwable $th) {
+            throw new \Exception('Error while storing the conversion rate. If you are using a custom adapter, please make sure it is working correctly. The API response was: ' . $response);
+        }
     }
 }
